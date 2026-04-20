@@ -44,6 +44,11 @@ with tab1:
     col_size1, col_size2 = st.columns(2)
     with col_size1:
         target_vc = st.number_input("Target Descent Velocity (m/s)", value=6.0, min_value=0.1, step=0.5)
+        # Added new inputs for canopy sizing equations
+        rho_0 = st.number_input("Sea-Level Air Density ρ₀ (kg/m³)", value=1.225, min_value=0.01, step=0.05)
+    with col_size2:
+        n_fill_const = st.number_input("Fill Constant (n)", value=11.7, min_value=0.1, step=0.5)
+        D_P = st.number_input("Parachute Diameter at Full Inflation D_P (m)", value=5.0, min_value=0.1, step=0.1)
         
     # Calculate Canopy Geometry
     computed_S0 = compute_canopy_area(mass, target_vc, CD0, atm_density)
@@ -70,6 +75,32 @@ with tab1:
         kinetic_energy = 0.5 * mass * target_vc**2
         st.success(f"**Computed Energy:** {kinetic_energy:.2f} J")
         st.caption(f"Inputs: m = {mass} kg, vc = {target_vc} m/s")
+
+    st.markdown("---")
+    
+    # Added additional canopy sizing calculations
+    col_eq4, col_eq5, col_eq6 = st.columns(3)
+    
+    with col_eq4:
+        st.markdown("**4. Sea-Level Descent Rate**")
+        st.latex(r"v_{c0} = \sqrt{\frac{2 \cdot W_T}{S_0 \cdot C_{D0} \cdot \rho_0}}")
+        v_c0 = compute_sea_level_descent_rate(mass, computed_S0, CD0, rho_0)
+        st.success(f"**Computed v_c0:** {v_c0:.2f} m/s")
+        st.caption(f"Inputs: W_T = {mass*9.81:.1f} N, S_0 = {computed_S0:.2f} m², C_D0 = {CD0}, ρ_0 = {rho_0} kg/m³")
+
+    with col_eq5:
+        st.markdown("**5. Altitude-Corrected Descent Rate**")
+        st.latex(r"v_c = v_{c0} \sqrt{\frac{\rho_0}{\rho}}")
+        v_c = compute_altitude_descent_rate(v_c0, rho_0, atm_density)
+        st.success(f"**Computed v_c:** {v_c:.2f} m/s")
+        st.caption(f"Inputs: v_c0 = {v_c0:.2f} m/s, ρ_0 = {rho_0} kg/m³, ρ = {atm_density:.4f} kg/m³")
+
+    with col_eq6:
+        st.markdown("**6. Filling Distance**")
+        st.latex(r"s_f = n \cdot D_P")
+        s_f = compute_filling_distance(n_fill_const, D_P)
+        st.success(f"**Computed s_f:** {s_f:.2f} m")
+        st.caption(f"Inputs: n = {n_fill_const}, D_P = {D_P} m")
 
     st.markdown("---")
     st.subheader("Steady-State Descent Sizing Plots")
