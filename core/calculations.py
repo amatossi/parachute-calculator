@@ -55,3 +55,39 @@ def compute_steady_state_force(atm_density, v_ls, S0, CD0):
     force_nominal = 0.5 * atm_density * v_ls^2 * S0 * CD0
     """
     return 0.5 * atm_density * (v_ls**2) * S0 * CD0
+
+def compute_annular_geometry(D0, num_gores, vent_ratio=0.611, shape_ratio=0.392):
+    """
+    Computes annular parachute geometry dimensions based on nominal diameter D0.
+    Default ratios are based on NWC reference annular geometry:
+    D_o = 1.000
+    D = 1.040
+    D_c = 0.940
+    L = 1.250
+    h = 0.304
+    b = 0.200
+    
+    Adjustable inputs:
+    vent_ratio (Dv/Do): default 0.611
+    shape_ratio ((a-b)/h): default 0.392
+    """
+    geom = {
+        "D": 1.040 * D0,
+        "D_c": 0.940 * D0,
+        "L": 1.250 * D0,
+        "h": 0.304 * D0,
+        "b": 0.200 * D0,
+    }
+    
+    # Adjustable geometries
+    geom["D_v"] = vent_ratio * D0
+    geom["a"] = geom["b"] + shape_ratio * geom["h"]
+    
+    # Derived apex height
+    geom["h_x"] = (geom["a"] + geom["b"] + geom["h"]) / 2.0 - geom["b"]
+    
+    # Gore layout
+    geom["C_v"] = (np.pi * geom["D_v"]) / num_gores
+    geom["C_s"] = (np.pi * geom["D"]) / num_gores
+    
+    return geom

@@ -5,7 +5,7 @@ from plotly.subplots import make_subplots
 from core.interpolation import evaluate_pflanz, evaluate_mit, generate_pflanz_curve, generate_mit_curve
 from core.calculations import (compute_nominal_diameter, compute_inflation_time, compute_ballistic_parameter,
                               compute_mass_ratio, compute_drag_integral, compute_generalized_fill_constant,
-                              compute_steady_state_force)
+                              compute_steady_state_force, compute_annular_geometry)
 from core.astm import compute_canopy_area, compute_filling_distance, compute_sea_level_descent_rate, compute_altitude_descent_rate, altitude_to_density
 from core.simulation import run_descent_simulation
 
@@ -32,7 +32,7 @@ else:
                                           help="Default is 1.225 kg/m³ (ASTM Sea Level).")
 
 # ---- TABS CONFIGURATION ----
-tab1, tab2, tab3 = st.tabs(["1. Canopy Sizing", "2. Opening Shock", "3. Descent Simulation"])
+tab1, tab2, tab3, tab4 = st.tabs(["1. Canopy Sizing", "2. Opening Shock", "3. Descent Simulation", "4. Annular Parachute Geometry"])
 
 # ==========================================
 # TAB 1: CANOPY SIZING
@@ -328,3 +328,199 @@ with tab3:
     fig_sim.update_yaxes(title_text="Height (m)", secondary_y=False, color="blue")
     fig_sim.update_yaxes(title_text="Velocity (m/s) & Acceleration (m/s²)", secondary_y=True)
     st.plotly_chart(fig_sim, use_container_width=True)
+
+# ==========================================
+# TAB 4: ANNULAR PARACHUTE GEOMETRY
+# ==========================================
+with tab4:
+    st.subheader("Annular Parachute Geometry")
+    st.markdown("""
+    - Previous tabs calculate the required parachute size to meet descent/design targets.
+    - This tab converts those target values into annular geometric dimensions based on established reference ratios.
+    - **Note:** This is the geometry-definition step, not the initial performance-sizing step.
+    """)
+    
+    col_top_left, col_top_right = st.columns([1, 1.2])
+    
+    with col_top_left:
+        st.markdown("**Sizing Input**")
+        override_d0_geom = st.checkbox("Override Computed D0? (Geometry)", value=False)
+        if override_d0_geom:
+            D0_geom = st.number_input("Override Nominal Diameter D0 (m)", value=float(computed_D0), min_value=0.1, step=0.1, key="d0_geom")
+        else:
+            D0_geom = computed_D0
+            st.info(f"Using Nominal Diameter (D0): {D0_geom:.2f} m")
+            
+        st.markdown("**Shape Adjustment**")
+        
+        vent_ratio_help = """Controls the size of the central vent relative to canopy diameter.
+
+Larger vent ratio:
+• decreases drag coefficient (less projected area)
+• decreases opening shock (faster pressure equalization)
+• increases stability (less oscillation / breathing)
+• may reduce drag performance if too large
+
+Smaller vent ratio:
+• increases drag
+• increases opening shock (more aggressive inflation)
+• increases risk of oscillation or puffing
+
+Note: Qualitative guidance only. This tool does not recompute Cd or shock from this parameter."""
+
+        shape_ratio_help = """Controls canopy profile curvature based on (a - b) relative to height.
+
+Larger shape ratio:
+• increases canopy curvature (“cupping”)
+• increases drag potential
+• increases opening shock (faster load buildup)
+• can improve stability if smooth
+
+Smaller shape ratio:
+• decreases curvature (flatter profile)
+• decreases drag
+• decreases opening shock
+• can reduce stability if too flat
+
+Note: Qualitative guidance only. This tool does not recompute Cd or shock from this parameter."""
+
+        vent_ratio = st.number_input("Vent Ratio (Dv/Do)", value=0.611, min_value=0.10, max_value=0.70, step=0.01, help=vent_ratio_help)
+        st.caption("Primary driver of drag & opening shock")
+        
+        shape_ratio = st.number_input("Shape Ratio ((a-b)/h)", value=0.392, min_value=0.10, max_value=0.70, step=0.01, help=shape_ratio_help)
+        st.caption("Controls canopy curvature & load behavior")
+
+        st.markdown("**Gore Details**")
+        num_gores = st.number_input("Number of Gores (N_G)", value=24, min_value=4, step=2)
+
+        # Compute geometry live
+        geom = compute_annular_geometry(D0_geom, num_gores, vent_ratio, shape_ratio)
+
+    with col_top_right:
+        st.subheader("Live Parametric Cross-Section")
+        
+        try:
+            # Generate the live profile using a smooth 2-segment Bezier representation
+            t = np.linspace(0, 1, 50)
+            
+            # --- Upper Segment (Vent to Max Diameter) ---
+            # P0: Vent
+            p0 = np.array([geom["D_v"] / 2.0, geom["h"]])
+            # P1: Extends outward and upward to crown above the vent, proportionally driven by 'a'
+            p1 = np.array([geom["D_v"] / 2.0 + (geom["D_c"] / 2.0 - geom["D_v"] / 2.0) * 0.55, geom["h"] + geom["a"] * 0.45])
+            # P2: Forces a vertical tangent approaching max diameter
+            p2 = np.array([geom["D_c"] / 2.0, geom["b"] + geom["a"] * 0.55])
+            # P3: Max diameter equator point
+            p3 = np.array([geom["D_c"] / 2.0, geom["b"]])
+            
+            rx1 = (1-t)**3 * p0[0] + 3*(1-t)**2 * t * p1[0] + 3*(1-t)*t**2 * p2[0] + t**3 * p3[0]
+            ry1 = (1-t)**3 * p0[1] + 3*(1-t)**2 * t * p1[1] + 3*(1-t)*t**2 * p2[1] + t**3 * p3[1]
+            
+            # --- Lower Segment (Max Diameter to Skirt) ---
+            skirt_r = (geom["D_c"] / 2.0) * 0.95
+            
+            q0 = p3
+            # Q1: Forces vertical tangent leaving max diameter downwards
+            q1 = np.array([geom["D_c"] / 2.0, geom["b"] * 0.5])
+            
+            # Q2: Enforce C1 continuity with the suspension line.
+            # The suspension line vector from payload to skirt is (skirt_r, L).
+            # Q2 must lie on the extended line above the skirt to match the slope exactly.
+            k_line = (geom["b"] * 0.2) / geom["L"]
+            q2 = np.array([skirt_r * (1 + k_line), geom["b"] * 0.2])
+            
+            # Q3: Skirt (pulled inward)
+            q3 = np.array([skirt_r, 0])
+            
+            rx2 = (1-t)**3 * q0[0] + 3*(1-t)**2 * t * q1[0] + 3*(1-t)*t**2 * q2[0] + t**3 * q3[0]
+            ry2 = (1-t)**3 * q0[1] + 3*(1-t)**2 * t * q1[1] + 3*(1-t)*t**2 * q2[1] + t**3 * q3[1]
+            
+            # Combine segments
+            rx = np.concatenate([rx1, rx2[1:]])
+            ry = np.concatenate([ry1, ry2[1:]])
+            
+            # Left canopy profile (Mirrored)
+            lx = -rx
+            ly = ry
+            
+            # Suspension Lines
+            payload_x = 0
+            payload_y = -geom["L"]
+            
+            fig_cross = go.Figure()
+            
+            # Canopy Profiles - Combined into single legend entry using None to break line
+            fig_cross.add_trace(go.Scatter(x=list(rx) + [None] + list(lx), y=list(ry) + [None] + list(ly), 
+                                           mode='lines', name='Canopy', line=dict(color='#00BFFF', width=3)))
+            
+            # Suspension Lines - Combined into single legend entry
+            fig_cross.add_trace(go.Scatter(x=[payload_x, q3[0], None, payload_x, -q3[0]], y=[payload_y, q3[1], None, payload_y, q3[1]], 
+                                           mode='lines', name='Suspension Lines', line=dict(color='gray', width=1.5)))
+            
+            # Centerline
+            fig_cross.add_trace(go.Scatter(x=[0, 0], y=[payload_y, geom["h"] * 1.2], mode='lines', name='Centerline', line=dict(color='red', width=1, dash='dashdot')))
+            
+            # Vent Opening Line
+            fig_cross.add_trace(go.Scatter(x=[-p0[0], p0[0]], y=[p0[1], p0[1]], mode='lines', name='Vent Opening', line=dict(color='#00FA9A', width=2, dash='dot')))
+            
+            # Payload point
+            fig_cross.add_trace(go.Scatter(x=[payload_x], y=[payload_y], mode='markers', name='Payload', marker=dict(color='white', size=8, symbol='diamond')))
+
+            # Styling cleanup: hide axes and configure clean plot space
+            fig_cross.update_layout(
+                xaxis=dict(showgrid=False, zeroline=False, visible=False),
+                yaxis=dict(showgrid=False, zeroline=False, visible=False, scaleanchor="x", scaleratio=1),
+                showlegend=True,
+                height=500,
+                hovermode="closest",
+                margin=dict(l=0, r=0, t=10, b=0),
+                plot_bgcolor='rgba(0,0,0,0)',
+                paper_bgcolor='rgba(0,0,0,0)'
+            )
+            
+            st.plotly_chart(fig_cross, use_container_width=True)
+            
+        except Exception as e:
+            st.error(f"Could not generate live cross-section with current parameters: {e}")
+
+    st.markdown("---")
+    
+    col_geom_res, col_geom_img = st.columns([1.5, 1])
+    
+    with col_geom_res:
+        st.markdown("**Derived Geometric Outputs**")
+        st.caption("Baseline ratios relative to nominal diameter D_o = 1.000")
+        
+        g1, g2, g3 = st.columns(3)
+        with g1:
+            st.metric("Constructed Diameter (D)", f"{geom['D']:.2f} m", help="Ratio 1.040")
+            st.metric("Design Diameter (D_c)", f"{geom['D_c']:.2f} m", help="Ratio 0.940")
+            st.metric("Vent Diameter (D_v)", f"{geom['D_v']:.2f} m", help=f"Ratio {vent_ratio:.3f} (User input)")
+        with g2:
+            st.metric("Profile Length (L)", f"{geom['L']:.2f} m", help="Ratio 1.250")
+            st.metric("Profile Height (h)", f"{geom['h']:.2f} m", help="Ratio 0.304")
+            st.metric("Apex Height (h_x)", f"{geom['h_x']:.2f} m", help="Derived from a, b, h")
+        with g3:
+            st.metric("Radius a (a)", f"{geom['a']:.2f} m", help="Derived from shape ratio")
+            st.metric("Radius b (b)", f"{geom['b']:.2f} m", help="Ratio 0.200")
+
+        st.markdown("**Gore-Specific Dimensions**")
+        g4, g5 = st.columns(2)
+        with g4:
+            st.latex(r"C_v = \frac{\pi D_v}{N_G}")
+            st.metric("Vent Gore Width (C_v)", f"{geom['C_v']:.3f} m")
+        with g5:
+            st.latex(r"C_s = \frac{\pi D}{N_G}")
+            st.metric("Skirt Gore Width (C_s)", f"{geom['C_s']:.3f} m")
+            
+        st.markdown("**Reference Equations**")
+        st.latex(r"h_x = \frac{a+b+h}{2} - b")
+        st.latex(rf"\text{{Vent/skirt elevation ratio: }} \frac{{a-b}}{{h}} = {shape_ratio:.3f}")
+        st.latex(r"D_o = 1.1284 \sqrt{S_o}")
+
+    with col_geom_img:
+        st.markdown("**Reference Geometry**")
+        try:
+            st.image("ringsail_geometry.png", caption="Reference geometry and variable definitions for annular parachute sizing.")
+        except Exception:
+            st.warning("⚠️ Reference image not found. Please save the illustration image as 'ringsail_geometry.png' in the root directory to display it here.")
