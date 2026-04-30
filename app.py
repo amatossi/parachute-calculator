@@ -47,8 +47,13 @@ with tab1:
         # Added new inputs for canopy sizing equations
         rho_0 = st.number_input("Sea-Level Air Density ρ₀ (kg/m³)", value=1.225, min_value=0.01, step=0.05)
     with col_size2:
-        n_fill_const = st.number_input("Fill Constant (n)", value=11.7, min_value=0.1, step=0.5)
-        D_P = st.number_input("Parachute Diameter at Full Inflation D_P (m)", value=5.0, min_value=0.1, step=0.1)
+        n_help = ("Flat circular simple round canopy: n ≈ 6–8\n\n"
+                  "Hemispherical canopy with extended skirt: n ≈ 8–12\n\n"
+                  "Annular toroidal canopy: n ≈ 10–14\n\n"
+                  "Ringsail high-performance slotted canopy: n ≈ 12–18+\n\n"
+                  "Reefed or staged inflation systems: effective n is typically higher\n\n"
+                  "Lower n generates higher shock load because it fills faster.")
+        n_fill_const = st.number_input("Fill Constant (n)", value=11.7, min_value=0.1, step=0.5, help=n_help)
         
     # Calculate Canopy Geometry
     computed_S0 = compute_canopy_area(mass, target_vc, CD0, atm_density)
@@ -96,11 +101,18 @@ with tab1:
         st.caption(f"Inputs: v_c0 = {v_c0:.2f} m/s, ρ_0 = {rho_0} kg/m³, ρ = {atm_density:.4f} kg/m³")
 
     with col_eq6:
-        st.markdown("**6. Filling Distance**")
-        st.latex(r"s_f = n \cdot D_P")
-        s_f = compute_filling_distance(n_fill_const, D_P)
+        fill_dist_help = (
+            "The inflation distance is considered time-independent because a parachute requires a fixed "
+            "volume of air to expand from a collapsed state to a full shape. Whether the system is moving "
+            "fast or slow, it must still travel through a specific \"column\" of air to \"scoop up\" that "
+            "required volume. Consequently, while a higher velocity will shorten the time it takes to inflate, "
+            "the distance traveled during that process remains relatively constant."
+        )
+        st.markdown("**6. Filling Distance**", help=fill_dist_help)
+        st.latex(r"s_f = n \cdot D_0")
+        s_f = compute_filling_distance(n_fill_const, computed_D0)
         st.success(f"**Computed s_f:** {s_f:.2f} m")
-        st.caption(f"Inputs: n = {n_fill_const}, D_P = {D_P} m")
+        st.caption(f"Inputs: n = {n_fill_const}, D_0 = {computed_D0:.2f} m")
 
     st.markdown("---")
     st.subheader("Steady-State Descent Sizing Plots")
